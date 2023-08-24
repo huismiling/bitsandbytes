@@ -224,6 +224,8 @@ matmul_cublas = MatMul8bit.apply
 
 def supports_igemmlt(device: torch.device) -> bool:
     """check if this device supports the optimized int8 kernel"""
+    # MLU not support igemm, 2023.08.24
+    return False
     if torch.cuda.get_device_capability(device=device) < (7, 5):
         return False
     device_name = torch.cuda.get_device_name(device=device)
@@ -324,9 +326,10 @@ class MatMul8bitLt(torch.autograd.Function):
         # 1. Quantize A
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
-        CA, CAt, SCA, SCAt, coo_tensorA = F.double_quant(A.to(torch.float16), threshold=state.threshold)
+        # Do Not Quantize A
+        CA, CAt, SCA, SCAt, coo_tensorA = [None]*5 # F.double_quant(A.to(torch.float16), threshold=state.threshold)
 
-        if state.threshold > 0.0 and coo_tensorA is not None:
+        if 0 and state.threshold > 0.0 and coo_tensorA is not None:
             if state.has_fp16_weights:
                 idx = torch.unique(coo_tensorA.colidx).long()
                 CA[:, idx] = 0
@@ -409,10 +412,13 @@ class MatMul8bitLt(torch.autograd.Function):
 
         else:
             A_wo_outliers = A.clone()
-            if state.idx is not None:
-                A_wo_outliers[:, state.idx.long()] = 0
-            output = torch.nn.functional.linear(A_wo_outliers, state.CB.to(A.dtype))
-            output = output.mul_(state.SCB.unsqueeze(0).mul(1.0 / 127.0))
+            # A_wo_outliers = torch.clamp(A, -64, 64)
+            # if state.idx is not None:
+            #     A_wo_outliers[:, state.idx.long()] = 0
+            # first dequant weight may have high precision !
+            deqant_w = state.CB.to(A.dtype) * state.SCB.unsqueeze(-1).mul(1.0 / 127.0).to(A.dtype)
+            deqant_w = deqant_w.reshape(deqant_w.shape[0], -1)
+            output = torch.nn.functional.linear(A_wo_outliers, deqant_w)
             if bias is not None:
                 output = output.add_(bias)
 

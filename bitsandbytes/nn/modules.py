@@ -6,6 +6,7 @@ from typing import Optional, TypeVar, Union, overload
 
 import warnings
 import torch
+import torch_mlu
 import torch.nn.functional as F
 from torch import Tensor, device, dtype, nn
 
@@ -302,6 +303,22 @@ class Int8Params(torch.nn.Parameter):
             setattr(self, "SCB", SCB)
 
         return self
+    
+    def mlu(self, device):
+        if self.has_fp16_weights:
+            return super().mlu(device)
+        else:
+            # we store the 8-bit rows-major weight
+            # we convert this weight to the turning/ampere weight during the first inference pass
+            B = self.data.contiguous().half().mlu(device)
+            CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
+            del CBt
+            del SCBt
+            self.data = CB
+            setattr(self, "CB", CB)
+            setattr(self, "SCB", SCB)
+
+        return self
 
     @overload
     def to(
@@ -331,6 +348,12 @@ class Int8Params(torch.nn.Parameter):
             and self.data.device.type == "cpu"
         ):
             return self.cuda(device)
+        elif (
+            device is not None
+            and device.type == "mlu"
+            and self.data.device.type == "cpu"
+        ):
+            return self.mlu(device)
         else:
             new_param = Int8Params(
                 super().to(
