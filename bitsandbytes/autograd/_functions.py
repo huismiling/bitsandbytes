@@ -411,14 +411,13 @@ class MatMul8bitLt(torch.autograd.Function):
                 output = output.to(A.dtype).add_(bias)
 
         else:
-            A_wo_outliers = A.clone()
-            # A_wo_outliers = torch.clamp(A, -64, 64)
+            super_scale = 4.0
+            A_wo_outliers = A.clone()/super_scale
             # if state.idx is not None:
             #     A_wo_outliers[:, state.idx.long()] = 0
             # first dequant weight may have high precision !
-            deqant_w = state.CB.to(A.dtype) * state.SCB.unsqueeze(-1).mul(1.0 / 127.0).to(A.dtype)
-            deqant_w = deqant_w.reshape(deqant_w.shape[0], -1)
-            output = torch.nn.functional.linear(A_wo_outliers, deqant_w)
+            output = torch.nn.functional.linear(A_wo_outliers.to(A.dtype), state.CB.to(A.dtype)).to(A.dtype)
+            output = output.mul_(state.SCB.unsqueeze(0).mul(super_scale / 127.0))
             if bias is not None:
                 output = output.add_(bias)
 
