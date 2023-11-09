@@ -1987,9 +1987,10 @@ def double_quant(
     assert A.dtype == torch.half
     assert device.type == "mlu"
 
-    # MLU only support PTQ, 2023.08.24, TODO: smoothQuant
+    # MLU only support PTQ
+    quant_bit = 7
     row_stats = A.abs().max(dim=-1).values.half()
-    out_row = torch.round((A / row_stats.unsqueeze(-1))*127).to(torch.int8)
+    out_row = torch.round((A / row_stats.unsqueeze(-1))*(2**(quant_bit-1))).to(torch.int8)
 
     return out_row, out_col, row_stats, col_stats, None
 

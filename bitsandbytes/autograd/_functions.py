@@ -20,6 +20,11 @@ tensor = torch.Tensor
 # The inverse transformation for the colTuring and colAmpere format were contributed by Alex Borzunov:
 # https://github.com/bigscience-workshop/petals/blob/main/src/petals/utils/linear8bitlt_patch.py
 
+use_mlu_ext = True
+try:
+    from mlu_ext.functions import cmm
+except:
+    use_mlu_ext = False
 
 
 """
@@ -411,13 +416,25 @@ class MatMul8bitLt(torch.autograd.Function):
                 output = output.to(A.dtype).add_(bias)
 
         else:
-            super_scale = 4.0
+            super_scale = 1.0 if use_mlu_ext else 32.0  # if a_max > 32.0 else 1.0
             A_wo_outliers = A.clone()/super_scale
             # if state.idx is not None:
             #     A_wo_outliers[:, state.idx.long()] = 0
-            # first dequant weight may have high precision !
-            output = torch.nn.functional.linear(A_wo_outliers.to(A.dtype), state.CB.to(A.dtype)).to(A.dtype)
-            output = output.mul_(state.SCB.unsqueeze(0).mul(super_scale / 127.0))
+
+            if use_mlu_ext:
+                a_max = A_wo_outliers.view(-1).abs().max().item() # *0.99
+                a_quant_scale = 1024.0
+                quant_A = torch.round((A_wo_outliers / a_max)*a_quant_scale).to(torch.int16)
+                quant_bit = 7
+                quant_w = state.CB
+                output = cmm(quant_A, quant_w.transpose(1,0), a_quant_scale, 2**(quant_bit-1))
+                a_scale = super_scale*a_max # /a_quant_scale
+                # a_scale = super_scale/a_quant_scale
+                out_scale = state.SCB.unsqueeze(0).mul((1.0) *a_scale)
+                output = output.mul_(out_scale).to(A.dtype)
+            else:
+                output = torch.nn.functional.linear(A_wo_outliers.to(A.dtype), state.CB.to(A.dtype)).to(A.dtype)
+                output = output.mul_(state.SCB.unsqueeze(0).mul(super_scale / 2**(quant_bit-1)))
             if bias is not None:
                 output = output.add_(bias)
 
