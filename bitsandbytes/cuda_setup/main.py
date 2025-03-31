@@ -117,6 +117,7 @@ class CUDASetup:
         self.initialized = True
         self.cuda_setup_log = []
 
+        return 
         binary_name, cudart_path, cc, cuda_version_string = evaluate_cuda_setup()
         self.cudart_path = cudart_path
         self.cuda_available = torch.cuda.is_available()

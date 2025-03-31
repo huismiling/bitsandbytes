@@ -1988,7 +1988,7 @@ def double_quant(
     assert device.type == "mlu"
 
     # MLU only support PTQ
-    quant_bit = 7
+    quant_bit = 8
     row_stats = A.abs().max(dim=-1).values.half()
     out_row = torch.round((A / row_stats.unsqueeze(-1))*(2**(quant_bit-1))).to(torch.int8)
 
